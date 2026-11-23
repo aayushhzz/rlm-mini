@@ -1,0 +1,11 @@
+snapshot s0001: create memory/operator_notes_format
+evidence: 2026-03-03T20:42:23Z [ops-note] NOTE author=mira: Honestly fed up with Zentrix Cloud: third missed SLA this month and their support keeps closing our tickets without a fix.
+rationale: The agent wasted several turns on file-header and keyword searches for 'vendor' and 'complain' before finding that the notes are embedded log lines tagged '[ops-note]'. Recording the format lets future questions about operator notes go straight to the right lines.
+--- a/memory.json
++++ b/memory.json
+@@ -1 +1,3 @@
+-{}
++{
++  "operator_notes_format": "Free-text operator notes are not separate files. They are log-style lines scattered across the source files, each tagged '[ops-note] NOTE author=<name>: <text>'. Find them by searching for the '[ops-note]' tag, not by file names or 'vendor'/'complain' keywords. Many note bodies repeat verbatim as routine boilerplate, so count and deduplicate bodies to surface the rare, unusual ones."
++}
+

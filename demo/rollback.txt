@@ -1,0 +1,2 @@
+restored harness_state/memory.json to its bytes before s0001 (sha256 ca3d163bab05)
+byte-identical after rollback

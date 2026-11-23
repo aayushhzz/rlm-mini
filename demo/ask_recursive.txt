@@ -1,0 +1,3 @@
+session=9f73c2f87a tokens=39441 (in 38474 / out 967) depth_used=2 subcalls=5
+Zentrix Cloud
+.venv/bin/rlm ask   7.13s user 5.16s system 16% cpu 1:15.19 total

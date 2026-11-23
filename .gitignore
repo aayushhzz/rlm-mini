@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+runs/
+bench/
+corpus/
+*.egg-info/

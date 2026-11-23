@@ -1,0 +1,68 @@
+session 53654f7349 (depth 0) Q: In the free-text operator notes, one vendor is the target of a comp...
+  answer='Zentrix Cloud'  tokens: in=32419 out=2673 total=35092  depth_used=0
+├─ turn 1  root call [in=1610 out=123] claude-haiku-5-5
+│    > import re
+│    > heads = re.findall(r'^===== FILE: (.*?) =====$', ctx, flags=re.M)
+│    > print(len(heads))
+│    > print([h for h in heads if re.search(r'note|operator|vendor|complain', h, re.I)][:50])
+│    = 44 []
+├─ turn 2  root call [in=1805 out=211] claude-haiku-5-5
+│    > heads = re.findall(r'^===== FILE: (.*?) =====$', ctx, flags=re.M)
+│    > print(heads)
+│    > for pat in [r'vendor', r'complain', r'operator']:
+│    >     hits = grep(ctx, pat, re.I)
+│    >     print(pat, len(hits))
+│    >     print(hits[:8])
+│    = ['README.md', 'deploy/nodes.yaml', 'services/auth/config.yaml', 'services/auth/handler.py', 'serv...
+├─ turn 3  root call [in=2514 out=408] claude-haiku-5-5
+│    > raw = re.findall(r'=====\s*FILE:.*', ctx)
+│    > print("raw markers:", len(raw))
+│    > for pat in [r'note', r'supplier', r'complaint|complained|complaining', r'\bvendor', r'free.?text']:
+│    >     hits = grep(ctx, pat, re.I)
+│    >     print(pat, len(hits))
+│    >     print(hits[:5])
+│    > print(harness.read("memory")[:500] if harness.read("memory") else "no memory")
+│    = raw markers: 44 note 420 [' # tuning note 0: revisit after load test', ' # tuning note 1: revisit...
+├─ turn 4  root call [in=2936 out=425] claude-haiku-5-5
+│    > parts = re.split(r'^===== FILE: (.*?) =====$', ctx, flags=re.M)
+│    > files = dict(zip(parts[1::2], parts[2::2]))
+│    > print(len(files))
+│    > for name, body in files.items():
+│    >     lines = [l for l in body.splitlines() if re.search(r'note', l, re.I) and not re.search(r'tuning note \d+: revisit after load test', l)]
+│    >     if lines:
+│    >         print(name, len(lines))
+│    >         print(lines[:3])
+│    = 44 lib/util_09.py 100 ['2026-03-01T00:02:29Z [ops-note] NOTE author=ana: Swapped on-call with dar...
+├─ turn 5  root call [in=3757 out=355] claude-haiku-5-5
+│    > notes = [l for l in ctx.splitlines() if '[ops-note]' in l]
+│    > print(len(notes))
+│    > pat = r'complain|unhappy|dissatisf|angry|escalat|refund|dispute|breach|missed|late|poor|outage|overcharg|frustrat|not happy|unacceptable|formal'
+│    > hits = [l for l in notes if re.search(pat, l, re.I)]
+│    > print(len(hits))
+│    > for l in hits[:15]:
+│    >     print(l[:220])
+│    = 402 1 2026-03-03T20:42:23Z [ops-note] NOTE author=mira: Honestly fed up with Zentrix Cloud: third...
+├─ turn 6  root call [in=4082 out=464] claude-haiku-5-5
+│    > neg = r'fed up|not happy|sla|closing our tickets|without a fix|complain|unhappy|disappoint|issue with|problem with|bad|worst|terrible|switch|cancel|leave|stop using'
+│    > hits2 = [l for l in notes if re.search(neg, l, re.I)]
+│    > print(len(hits2))
+│    > for l in hits2[:10]:
+│    >     print(l[:200])
+│    > print(sum('Zentrix' in l for l in ctx.splitlines()))
+│    = 2 2026-03-03T20:42:23Z [ops-note] NOTE author=mira: Honestly fed up with Zentrix Cloud: third mis...
+├─ turn 7  root call [in=4472 out=441] claude-haiku-5-5
+│    > from collections import Counter
+│    > bodies = [re.sub(r'^.*?NOTE author=\w+: ', '', l) for l in notes if 'NOTE author=' in l]
+│    > cnt = Counter(bodies)
+│    > print(len(bodies), len(cnt))
+│    > rare = [b for b, c in cnt.items() if c == 1]
+│    > print(len(rare))
+│    > for b in rare[:25]:
+│    >     print(b[:200])
+│    = 402 111 46 Capacity review for inventory pushed to next week, lena is out sick. Capacity review f...
+├─ turn 8  root call [in=5281 out=230] claude-haiku-5-5
+│    > for b in rare[25:]:
+│    >     print(b[:200])
+│    = Pairing with ana on the search flaky test tomorrow morning. Swapped on-call with hana for the wee...
+├─ turn 9  root call [in=5962 out=16] claude-haiku-5-5
+└─ FINAL 'Zentrix Cloud'

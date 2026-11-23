@@ -1,0 +1,2 @@
+checked 85 logged root/child prompts; max corpus chars in one prompt = 3432 (cap 8000)
+PASS
