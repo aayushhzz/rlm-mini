@@ -1,224 +1,193 @@
-# rlm-mini
+<p align="center">
+  <img src="assets/banner.svg" alt="rlm-mini — Recursive Language Model harness with a Continual Harness" width="100%" />
+</p>
 
-A small, working Recursive Language Model (RLM) harness with a Continual Harness, built from the paper
-**Prime Agent: A Self-Improving RLM Harness** (Karten, Zhang, et al., arXiv
-[2608.23552](https://arxiv.org/abs/2608.23552), official code at
-[PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent)). This is an independent
-re-implementation of the core idea, not a port of the official code. `PAPER_NOTES.md` maps each paper
-concept to the file that implements it and lists what was simplified.
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-%3E%3D3.9-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python 3.9+" /></a>
+  <a href="https://arxiv.org/abs/2608.23552"><img src="https://img.shields.io/badge/arXiv-2608.23552-f43f5e?style=flat-square" alt="arXiv 2608.23552" /></a>
+  <img src="https://img.shields.io/badge/runtime-Jupyter%20Kernel-a855f7?style=flat-square" alt="Jupyter Kernel" />
+  <a href="https://github.com/aayushhzz/rlm-mini/stargazers"><img src="https://img.shields.io/github/stars/aayushhzz/rlm-mini?style=flat-square&color=f43f5e" alt="GitHub Stars" /></a>
+  <a href="https://github.com/aayushhzz/rlm-mini/issues"><img src="https://img.shields.io/github/issues/aayushhzz/rlm-mini?style=flat-square&color=71717a" alt="GitHub Issues" /></a>
+</p>
 
-## What the paper is, and why it matters
+<p align="center">
+  <a href="#architecture">Architecture</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#cli-reference">CLI Reference</a> •
+  <a href="#demo-results">Demo Results</a> •
+  <a href="#testing">Testing</a> •
+  <a href="PAPER_NOTES.md">Paper Notes</a> •
+  <a href="docs/architecture.md">Architecture Docs</a>
+</p>
 
-A model can only reason over what is in its context window. Prime Agent gives the model one tool, a
-persistent Python kernel, and puts the long input in that kernel as a variable instead of in the prompt.
-The model writes code to inspect it (slicing, regex, loops, `len`), and it can call models from inside
-that code: `llm()` for a cheap sub-call and `rlm()` for a recursive child agent with its own kernel. Only
-short cell outputs return to the root model, so a 300k-character input costs a few thousand prompt tokens
-per turn. On top of this, the Continual Harness keeps prompts, memories and skills on disk. `/refine`
-turns evidence from a past trajectory into one small, versioned edit, and `/rollback` undoes it. The base
-system prompt is never touched. The paper reports large gains from this design, for example ARC-AGI-3
-going from 30% to 95.5%, and argues that harness failures should not be mistaken for model failures.
+---
 
-## What is here
+**`rlm-mini`** is a small, working **Recursive Language Model (RLM)** harness with a **Continual Harness**, independently implemented from **Prime Agent: A Self-Improving RLM Harness** (Karten, Zhang, et al., [arXiv:2608.23552](https://arxiv.org/abs/2608.23552), official code at [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent)).
 
-| Command | What it does |
-|---|---|
-| `rlm ask "question"` | Root model answers over the ~295k-char corpus bound as `ctx` (or `--ctx FILE`). The corpus never goes into the prompt. |
-| `rlm trace <session>` | Prints the code the model wrote, cell by cell, with `llm()`/`rlm()` sub-calls nested as a tree and per-call tokens. |
-| `rlm check-logs` | Re-measures every logged root and child prompt and fails if any holds more than 8000 chars of corpus text. |
-| `rlm refine [--session id]` | Reviews the last trajectory and writes exactly one edit to `harness_state/` with a snapshot id, a verbatim evidence quote, a rationale and a diff. |
-| `rlm rollback <id>` | Restores the file that edit touched to its exact pre-edit bytes. |
-| `rlm snapshots` | Lists snapshots with trigger and outcome. |
-| `rlm bench [--limit N] [--ids q01,..] [--rounds 3]` | Three arms on 20 needle and aggregation questions: (a) prompt stuffing, (b) RLM, (c) RLM after 3 `/refine` rounds. Writes accuracy, total tokens, recursion depth and sub-calls to `results.md`. |
+Instead of stuffing a 295k-character corpus into the prompt, `rlm-mini` binds it as `ctx` inside a persistent **Jupyter Python kernel**. The root model writes Python cells (`grep`, `chunk`, slicing, loops) and can invoke `llm()` for cheap sub-calls or `rlm()` for recursive child agents with their own kernels. Only truncated cell outputs return to the root model, keeping prompt corpus exposure strictly under `8,000` characters. On top, `rlm refine` turns trajectory evidence into one small, versioned edit to `harness_state/` with instant byte-exact `rlm rollback`.
 
-Kernel helpers: `ctx`, `grep(text, pattern)`, `chunk(text, n)`, `llm(prompt)`, `rlm(prompt, sub_ctx)`,
-`rlm.spawn(prompt, sub_ctx)` (returns a Future), `harness` (also `rlm.harness`: CRUD over
-`harness_state/{prompts,skills,memory}.json`), and `FINAL(answer)`.
+See [PAPER_NOTES.md](PAPER_NOTES.md) for the paper-to-code map and [docs/architecture.md](docs/architecture.md) for runtime internals.
 
-The corpus (`rlm/corpus.py`) is generated deterministically: a synthetic repo dump (service configs,
-handlers, padding modules) interleaved with four days of logs, about 400 free-text operator notes and
-planted facts. All 20 gold answers are computed from the generator, so they are exact. Several needles
-sit past the first 80k characters, which the stuffing arm cannot see.
+## Architecture
 
-## Model backends
+```mermaid
+flowchart TB
+    Q["User Question + ~295k Corpus (ctx)"] --> R["Root Model (depth 0)<br/>system = base_system_prompt.md + harness_state/"]
+    R -->|"```python cell```"| K["Persistent Jupyter Kernel<br/>ctx, grep(), chunk(), FINAL(), harness"]
+    K -->|"truncated output (cap ≤8000 corpus chars)"| R
+    K -->|"llm(prompt)"| SUB["Sub-model call"]
+    K -->|"rlm(prompt, sub_ctx) / rlm.spawn()"| CHILD["Child RLM Agent (depth + 1)<br/>own kernel & runs/&lt;child&gt;.jsonl"]
+    CHILD --> K
+    R --> LOG["runs/&lt;session&gt;.jsonl"]
+    LOG --> REF["rlm refine → 1 evidence-backed edit<br/>harness_state/{prompts,skills,memory}.json"]
+    REF --> SNAP["harness_state/snapshots/sNNNN<br/>(rlm rollback restores exact bytes)"]
+```
 
-All model calls go through one interface in `rlm/backends.py`: `complete(system, messages, role)`.
+## Quick Start
 
-- **`claude` (default).** Spawns `claude -p --output-format json` with built-in tools disabled
-  (`--tools ""`), no session persistence, no settings, MCP or slash commands, run from an empty temp
-  directory. It uses the Claude Code CLI's logged-in claude.ai subscription. No API key is used, and
-  `ANTHROPIC_API_KEY` is removed from the subprocess environment so the login is always used. The model
-  is the CLI's default (it reported `claude-haiku-5-5` early on and `claude-opus-5-5` later). Override it with `--model sonnet` or
-  `--model claude-sonnet-5-5` (`RLM_MODEL`); `--sub-model` (`RLM_SUB_MODEL`) sets the `llm()` model.
-- **`ollama` (optional, local).** `qwen3:8b` as root and `qwen3:4b-instruct` for `llm()`. It uses
-  Ollama's native `/api/chat` instead of the OpenAI-compatible endpoint, because only the native API can
-  set `num_ctx` per request (32768 for the stuffing arm), and it turns off qwen3's thinking.
-- **`fake`.** Scripted and rule-based, for offline tests.
-
-Choose with `--backend` or `RLM_BACKEND`. The kernel and every recursive child inherit the choice through
-the environment.
-
-**Terms note.** This uses your personal Claude subscription through the local Claude Code login, which is
-meant for your own local use. If you share or deploy it for other people, switch to API-key
-authentication as Anthropic's Agent SDK terms require.
-
-## Setup
+### Installation
 
 ```bash
+git clone https://github.com/aayushhzz/rlm-mini.git
 cd rlm-mini
+
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-claude auth status          # needs loggedIn: true (claude.ai)
-# optional local backend:
+
+# Default backend uses the local Claude Code CLI login:
+claude auth status          # expects loggedIn: true (claude.ai)
+
+# Optional local backend via Ollama:
 ollama pull qwen3:8b && ollama pull qwen3:4b-instruct
 ```
 
-## Run
+### Run
 
 ```bash
+# Ask a question over the ~295k-char generated corpus (or pass --ctx FILE)
 .venv/bin/rlm ask "In the free-text operator notes, one vendor is the target of a complaint. Which vendor?"
-.venv/bin/rlm trace <session-id-printed-above>
+
+# Inspect the execution tree and per-call token accounting
+.venv/bin/rlm trace <session-id>
+
+# Verify no logged root/child prompt exceeded the corpus-char cap
 .venv/bin/rlm check-logs
+
+# Continual Harness: refine from the last trajectory, list snapshots, rollback
 .venv/bin/rlm refine && .venv/bin/rlm snapshots
 .venv/bin/rlm rollback s0001
+
+# 3-arm benchmark (prompt stuffing vs RLM vs RLM + refines)
 .venv/bin/rlm bench --ids q01,q08,q10,q19,q20      # small Claude run
 .venv/bin/rlm --backend ollama bench               # all 20 questions, local
-.venv/bin/python -m pytest -q                      # offline tests, fake backend
+
+# Offline test suite (real Jupyter kernel, fake backend)
+.venv/bin/python -m pytest -q
 ```
 
-Settings: `RLM_CELL_TIMEOUT` (240 s per cell), `RLM_CORPUS_CAP` (8000), `RLM_MAX_DEPTH` (2),
-`RLM_EFFORT` (`--effort` passed to `claude -p`, default `low`), `RLM_HOME` (state directory; default is this
-folder).
+## CLI Reference
 
-State on disk: `runs/<session>.jsonl` holds the append-only event log per session, and a child's
-`sub_ctx` is saved as `runs/<child>.ctx.txt`. `harness_state/` holds the Continual Harness and its
-`snapshots/`. `bench/<bench-id>/` gets its own fresh `harness_state/` and `runs/`, so a bench never
-changes your main harness.
+Entrypoint `rlm` ([rlm/cli.py](rlm/cli.py)). Global flags `--backend`, `--model`, `--sub-model`, and `--home` go before the subcommand.
 
-## Demo output
+| Command | Key Flags | What It Does |
+|---|---|---|
+| `rlm ask "question"` | `--ctx FILE`, `--max-turns` (`8`) | Answers over the ~295k-char corpus bound as `ctx`. Corpus never enters the prompt. |
+| `rlm trace <session>` | — | Renders cells and nested `llm()`/`rlm()` sub-calls as a tree with per-call tokens. |
+| `rlm check-logs` | `--cap` (`8000`) | Re-measures every logged root/child prompt and fails (exit `1`) if any exceeds `--cap` corpus chars. |
+| `rlm refine` | `--session ID` | Reviews a trajectory and writes one evidence-backed edit to `harness_state/` with snapshot + diff. |
+| `rlm rollback <id>` | — | Restores the edited file in `harness_state/` to its exact pre-edit bytes. |
+| `rlm snapshots` | — | Lists all Continual Harness snapshots with trigger and outcome. |
+| `rlm bench` | `--limit N`, `--ids q01,..`, `--rounds 3`, `--out FILE` | Runs 3 arms — (a) 80k prompt stuffing, (b) RLM, (c) RLM + `/refine` rounds — and writes `results.md`. |
 
-All runs below were real calls through the local Claude Code CLI (claude.ai Pro login, no API key) on
-2026-11-20. The CLI's default model was reported as `claude-haiku-5-5` for some early calls and
-`claude-opus-5-5` for later ones (the default is the CLI's choice). Raw output is in `demo/`, and the
-logs are in `runs/` and `bench/`.
+**Kernel helpers** ([rlm/repl_api.py](rlm/repl_api.py)): `ctx`, `grep(text, pattern)`, `chunk(text, n)`, `llm(prompt)`, `rlm(prompt, sub_ctx)`, `rlm.spawn(prompt, sub_ctx)` (returns a `Future`), `harness` (`rlm.harness`), and `FINAL(answer)`.
 
-**`rlm ask`** (`demo/ask.txt`, `demo/trace_ask.txt`): correct after 9 turns, 35,092 tokens. The model
-found the notes with `grep`, removed the boilerplate and printed only the rare lines.
+## Backends & Configuration
 
-```
-$ rlm ask "In the free-text operator notes, one vendor is the target of a complaint. Which vendor?"
-session=53654f7349 tokens=35092 (in 32419 / out 2673) depth_used=0 subcalls=0
-Zentrix Cloud
-```
+All model calls pass through `complete(system, messages, role)` in [rlm/backends.py](rlm/backends.py):
 
-**Recursion, `rlm trace`** (`demo/trace_recursive.txt`). The question asked the model to delegate. The
-root passed 402 note lines (48,726 chars) to an `rlm()` child. The child mapped `llm()` over
-15,000-char chunks, which is depth 2 with 5 sub-calls in total.
+- **`claude`** *(default)*: runs `claude -p --output-format json --tools ""` from an empty temp directory using the local Claude Code login (`ANTHROPIC_API_KEY` is stripped).
+- **`ollama`** *(local)*: uses native `/api/chat` (`qwen3:8b` root, `qwen3:4b-instruct` sub-calls, `num_ctx=32768` for stuffing).
+- **`fake`**: scripted/rule-based backend for offline tests.
 
-```
-session 9f73c2f87a (depth 0) Q: Collect the [ops-note] lines into one string and delegate to a chil...
-  answer='Zentrix Cloud'  tokens: in=38474 out=967 total=39441  depth_used=2
-├─ turn 1  root call [in=1703 out=92] claude-opus-5-5
-│    > lines = grep(ctx, r"\[ops-note\]")
-│    > s = "\n".join(lines); print(len(lines), len(s))
-│    > r = rlm("Which of these operator notes complains about a vendor? Reply with just the vendor name.", s); print(r)
-│    └─ rlm() [in=32866 out=754] prompt='Which of these operator notes complains about a...' -> 'Zentrix Cloud'
-│         session 367ff55750 (depth 1) Q: Which of these operator notes complains about a vendor? ...
-│         ├─ turn 2  root call [in=2000 out=138] claude-opus-5-5
-│         │    > res=[llm("These are operator notes. Does any note complain about a vendor ...\n\n"+p) for p in chunk(ctx,15000)]
-│         │    └─ llm() [in=7967 out=117] prompt='These are operator notes. Does any note complai...' -> 'NONE. Every vendor mention (Kestrel D...'
-│         │    └─ llm() [in=7921 out=89] ...
-│         │    └─ llm() [in=7919 out=97] ... -> 'Yes. Vendor: **Zentrix Cloud** > 2026...'
-│         │    └─ llm() [in=2708 out=89] ...
-│         └─ FINAL 'Zentrix Cloud'
-...
-└─ FINAL 'Zentrix Cloud'
-```
+| Environment Variable | Default | Purpose |
+|---|---|---|
+| `RLM_BACKEND` | `claude` | Backend (`claude`, `ollama`, `fake`), inherited by kernels & child agents |
+| `RLM_MODEL` / `RLM_SUB_MODEL` | *(backend default)* | Root and `llm()` sub-call model overrides |
+| `RLM_CELL_TIMEOUT` | `240` | Per-cell execution timeout in seconds |
+| `RLM_CORPUS_CAP` | `8000` | Maximum corpus characters allowed in any root/child prompt |
+| `RLM_MAX_DEPTH` | `2` | Maximum recursion depth for `rlm()` |
+| `RLM_EFFORT` | `low` | `--effort` flag passed to `claude -p` |
+| `RLM_HOME` | *(project root)* | State directory for `runs/`, `harness_state/`, and `bench/` |
 
-**Corpus cap, `rlm check-logs`** (`demo/check_logs.txt`), run over every logged prompt from all the runs
-above, children included:
+> **Terms note:** The default `claude` backend uses your personal Claude Code CLI login and is meant for personal local use. Deploying it for other users requires switching to API-key authentication per Anthropic's terms.
 
-```
-checked 85 logged root/child prompts; max corpus chars in one prompt = 3432 (cap 8000)
-PASS
-```
+## Demo Results
 
-**`rlm refine` and `rlm rollback`** (`demo/refine.txt`, `demo/rollback.txt`). The refine ran on the
-`ask` trajectory and wrote one memory entry. Its evidence was the verbatim log line the agent had found.
-Rollback then restored every file: the sha256 of every `harness_state` file matched the hashes taken
-before the refine (`demo/sha_before.txt` vs `demo/sha_after.txt`).
+Real runs via the local Claude Code CLI (no API key, raw logs in [demo/](demo/), [runs/](runs/), and [results.md](results.md)):
 
-```
-snapshot s0001: create memory/operator_notes_format
-evidence: 2026-03-03T20:42:23Z [ops-note] NOTE author=mira: Honestly fed up with Zentrix Cloud: ...
-rationale: The agent wasted several turns on file-header and keyword searches ...
-$ rlm rollback s0001
-restored harness_state/memory.json to its bytes before s0001 (sha256 ca3d163bab05)
-byte-identical after rollback
-```
+- **`rlm ask`** ([demo/ask.txt](demo/ask.txt)): answered `Zentrix Cloud` in 9 turns (`35,092` tokens).
+- **Recursive `rlm()` + `llm()`** ([demo/trace_recursive.txt](demo/trace_recursive.txt)): root passed 402 `[ops-note]` lines (48,726 chars) to a depth-1 `rlm()` child, which mapped `llm()` over 15,000-char chunks (depth 2, 5 sub-calls, `39,441` total tokens).
+- **Corpus cap check** ([demo/check_logs.txt](demo/check_logs.txt)): `85` logged prompts checked; max corpus chars in one prompt = **3,432** (cap `8,000`) → **PASS**.
+- **Refine & Rollback** ([demo/refine.txt](demo/refine.txt), [demo/rollback.txt](demo/rollback.txt)): wrote `s0001` (`create memory/operator_notes_format`) with verbatim log evidence; `rlm rollback s0001` restored byte-identical SHA-256 hashes.
 
-**`rlm bench`, a small Claude run on 5 of the 20 questions** (`results.md`, `demo/bench_claude.log`).
-To save Pro usage, it covered two aggregation questions, one late needle and both free-text questions:
+### 3-Arm Benchmark (5 questions: 2 aggregations, 1 late needle, 2 free-text — [results.md](results.md))
 
-| Arm | Accuracy | Total tokens | Mean tokens / question | Max recursion depth | Sub-calls |
+| Arm | Accuracy | Total Tokens | Mean Tokens / Q | Max Depth | Sub-calls |
 |---|---|---|---|---|---|
-| (a) prompt stuffing, first 80k chars | 0/5 (0%) | 202,112 | 40,422 | 0 | 0 |
-| (b) RLM | 5/5 (100%) | 88,093 | 17,618 | 0 | 0 |
-| (c) RLM + 3 refines | 5/5 (100%) | 86,248 | 17,249 | 0 | 0 |
+| (a) Prompt stuffing (first 80k chars) | 0/5 (0%) | 202,112 | 40,422 | 0 | 0 |
+| (b) RLM | **5/5 (100%)** | 88,093 | 17,618 | 0 | 0 |
+| (c) RLM + 3 refines | **5/5 (100%)** | **86,248** | **17,249** | 0 | 0 |
 
-The three refine edits were memory notes on the log-line format, on the `status=` field (the model had
-matched `latency_ms=503` by mistake) and on the `===== FILE:` block format. Each cites a verbatim
-evidence quote. Stuffing saw only the first 80k chars. It miscounted both aggregations (13 vs 64,
-6 vs 17) and could not see the needles.
+See [results_claude_semantic.md](results_claude_semantic.md) for the follow-up 2-question semantic run.
 
-A second 2-question run (`results_claude_semantic.md`) came after one sentence was added to the base
-prompt nudging `llm()` for free-text questions. It went 0/2, 2/2, 2/2. In arm (c), one root turn on
-q19 reported 128k output tokens for a 106-character reply, probably runaway thinking, so that arm's
-total is 261,923 tokens. Since then the backend passes `--effort low` by default (`RLM_EFFORT`).
+## Project Structure
 
-In these bench runs the models answered with `grep` and plain Python alone (depth 0). The recursive
-sub-call trajectory shown above is from `rlm ask`. The offline bench test also exercises sub-calls.
+```text
+rlm-mini/
+├── assets/
+│   └── banner.svg                 # Repository hero banner
+├── docs/
+│   └── architecture.md            # Kernel loop, corpus cap, and Continual Harness design
+├── rlm/
+│   ├── cli.py                     # `rlm` CLI entrypoint
+│   ├── agent.py                   # Root/child RLM loop and corpus-cap enforcement
+│   ├── kernel.py                  # Persistent Jupyter kernel wrapper with cell timeouts
+│   ├── repl_api.py                # In-kernel helpers: ctx, grep, chunk, llm, rlm, FINAL
+│   ├── harness.py                 # Versioned Continual Harness + byte-exact snapshots
+│   ├── refine.py                  # Evidence-backed single-edit trajectory refiner
+│   ├── trace.py                   # JSONL session logging, tree renderer, check-logs
+│   ├── backends.py                # Claude CLI, Ollama, and fake model backends
+│   ├── corpus.py                  # Deterministic ~295k-char repo/log corpus + 20 gold Qs
+│   ├── bench.py                   # 3-arm isolated benchmark runner
+│   └── base_system_prompt.md      # Immutable base system prompt
+├── tests/                         # 14 offline pytest tests (real Jupyter kernel + fake backend)
+├── demo/                          # Recorded CLI outputs and benchmark logs
+├── paper/prime-agent.pdf          # Reference paper
+├── PAPER_NOTES.md                 # Concept-to-code mapping and simplifications
+├── pyproject.toml
+└── README.md
+```
 
-**Not run: the full 20-question bench.** I started it on Ollama twice. With `num_ctx` at 32768,
-`qwen3:8b` takes 9.9 GB, and on this 16 GB machine the system went 10 GB into swap; the first
-stuffing call never returned, so I stopped it. A standalone stuffing call worked once and took 96 s,
-but Ollama only evaluated 16,386 prompt tokens, which means it silently cut the start of the 80k
-chars. A single Ollama `ask` (`demo/ask_ollama.txt`) ran in 13 s, but `qwen3:8b` called `FINAL` in its
-first cell and gave a wrong answer. `rlm bench` with no flags runs all 20 questions. On Claude that is
-roughly 1.5M tokens.
+## Testing
 
-## Tests
+```bash
+.venv/bin/python -m pytest -q
+```
 
-`.venv/bin/python -m pytest -q` runs 14 tests offline, using a real Jupyter kernel and the fake backend.
-No Claude or Ollama calls are made. The tests cover:
-
-- `ctx` is bound in the kernel; prompts stay under 8k chars while the kernel computes the exact count.
-- A greedy model that prints 5k-char slices of `ctx` every turn still stays under the cap (old outputs
-  are elided), checked by `check_logs` over the written logs.
-- `llm()` and `rlm()` sub-calls run (the child gets its own kernel and log) and render as a tree with
-  per-call tokens.
-- The per-cell timeout interrupts the cell and the kernel survives.
-- `refine` writes exactly one edit (one file, one key, one snapshot) with evidence, and `rollback`
-  restores the bytes exactly, including create, update and delete chains.
-- The base system prompt's sha256 is unchanged after refines, including one where the model tries to
-  edit it. Fabricated evidence, leaked gold answers and skills that do not compile are rejected.
-- Gold answers match the generated text, scoring is whole-token, and an offline 3-arm bench writes
-  `results.md`.
+Runs 14 offline tests using a real Jupyter kernel and the `fake` backend covering corpus-cap enforcement, output elision, nested `llm()`/`rlm()` trees, cell timeouts, single-edit `refine` validation, byte-exact `rollback`, base prompt immutability, and the 3-arm benchmark.
 
 ## Limits
 
-- **Not a sandbox.** Model-written code runs as you, with your permissions, in this folder, and can read
-  and write files and use the network. Use it only on your own machine with inputs you trust.
-- Each root turn is a fresh, stateless `claude -p` call that re-sends the short conversation. The CLI
-  adds some fixed overhead per call (about 1k tokens of its own system context, mostly cached).
-- `rlm()` blocks; `rlm.spawn` uses threads. There is no daemon, no agent-to-agent messaging, no
-  compaction and no restart recovery (see `PAPER_NOTES.md`).
-- Rolling back an older snapshot restores that file as it was before that edit, so later edits to the
-  same file are discarded.
-- The stuffing arm sends the first 80,000 corpus characters. Claude counts them as about 40k tokens.
-  Ollama, at `num_ctx` 32768, cut the prompt to about 16k tokens.
-- The bench's refine rounds learn from the same questions arm (c) is scored on. Edits that contain a gold
-  answer are rejected, but this is still not a held-out evaluation. With so few questions, small
-  accuracy differences are noise.
-- Recursion is the model's choice. Strong models often answer with `grep` alone, so `llm()`/`rlm()`
-  sub-calls show up mostly on the free-text questions.
+- **Not a sandbox.** Model-written Python executes as your local user with full filesystem and network permissions — use only with trusted inputs.
+- **Stateless `claude -p` turns.** Each turn invokes a fresh CLI call (~1k cached system-context overhead).
+- **Synchronous `rlm()` / threaded `rlm.spawn()`.** No daemon, agent-to-agent messaging, compaction, or crash recovery (see [PAPER_NOTES.md](PAPER_NOTES.md)).
+- **Point-in-time rollback.** Rolling back an older snapshot restores that file to its exact pre-edit bytes, discarding subsequent edits to that same file.
+- **In-sample bench refinement.** The bench's refine rounds learn from the same question set scored in arm (c) (though gold-answer leaks are rejected).
+
+---
+
+<p align="center">
+  Built by <a href="https://github.com/aayushhzz">aayushhzz</a> •
+  <a href="https://github.com/aayushhzz/rlm-mini/issues">Report an Issue</a> •
+  <a href="https://github.com/aayushhzz">More Projects</a>
+</p>
