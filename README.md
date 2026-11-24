@@ -33,7 +33,7 @@ See [PAPER_NOTES.md](PAPER_NOTES.md) for the paper-to-code map and [docs/archite
 ```mermaid
 flowchart TB
     Q["User Question + ~295k Corpus (ctx)"] --> R["Root Model (depth 0)<br/>system = base_system_prompt.md + harness_state/"]
-    R -->|"```python cell```"| K["Persistent Jupyter Kernel<br/>ctx, grep(), chunk(), FINAL(), harness"]
+    R -->|"python cell"| K["Persistent Jupyter Kernel<br/>ctx, grep(), chunk(), FINAL(), harness"]
     K -->|"truncated output (cap ≤8000 corpus chars)"| R
     K -->|"llm(prompt)"| SUB["Sub-model call"]
     K -->|"rlm(prompt, sub_ctx) / rlm.spawn()"| CHILD["Child RLM Agent (depth + 1)<br/>own kernel & runs/&lt;child&gt;.jsonl"]
